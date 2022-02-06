@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'VICHHIKA Rothtana: AWS CloudFormation Template for Final Exam'
+
+Parameters:
+  InstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t1.micro
+    AllowedValues:
+      - t1.micro
+      - t2.nano
+    ConstraintDescription: must be a valid EC2 instance type.
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  SSHLocation:
+    Description: The IP address range that can be used to SSH to the EC2 instances
+    Type: String
+    Default: 0.0.0.0/0
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id'
+Resources:
+  EC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref 'InstanceType'
+      SecurityGroups:
+        - !Ref 'InstanceSecurityGroup1'
+        - !Ref 'InstanceSecurityGroup2'
+      KeyName: !Ref 'KeyName'
+      ImageId: !Ref 'LatestAmiId'
+      Tags:
+        - Key: Name
+          Value: IT-Step-Academy-EC2
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash -xe 
+          sudo yum update -y
+          sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose 
+          cat << EOF > /opt/docker-compose.yml
+          version: '3'
+          services:
+          mediawiki:
+          image: mediawiki
+          restart: always
+          ports:
+          - 8080:80
+          links:
+          - database
+          volumes:
+          - /var/www/html/images
+          # After initial setup, download LocalSettings.php to the same directory as
+          # this yaml and uncomment the following line and use compose to restart
+          # the mediawiki service
+          # - ./LocalSettings.php:/var/www/html/LocalSettings.php
+          database:
+          image: mariadb
+          restart: always
+          environment:
+          MYSQL_DATABASE: my_wikidb
+          MYSQL_USER: wikiuser
+          MYSQL_PASSWORD: itstep
+          MYSQL_RANDOM_ROOT_PASSWORD: 'yes' 
+          EOF
+          sudo docker-compose -f /opt/docker-compose.yml up -d
+  InstanceSecurityGroup1:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Ref 'SSHLocation'
+      Tags:
+        - Key: Name
+          Value: SSH-Instance-SG
+  InstanceSecurityGroup2:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable SSH access via port 80
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: !Ref 'SSHLocation'
+      Tags:
+        - Key: Name
+          Value: Web-Instance-SG
+  EIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      InstanceId: !Ref 'EC2Instance'
